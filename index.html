@@ -39,6 +39,8 @@
   .nav button { font-size: 20px; line-height: 1; padding: 4px 12px; }
   #dateLabel { font-size: 22px; font-weight: 700; }
   .actions { display: flex; gap: 8px; align-items: center; }
+  .actions button, .actions .net { white-space: nowrap; }
+  @media (max-width: 520px) { .actions { flex-wrap: wrap; gap: 6px; } .actions input[type=date] { flex: 1; min-width: 0; } }
 
   .week { display: grid; grid-template-columns: 40px repeat(7, 1fr) 40px; gap: 6px; max-width: 1200px; margin: 0 auto; padding: 0 20px 12px; }
   .wnav { display: flex; align-items: center; justify-content: center; padding: 0; border-radius: 10px;
@@ -149,6 +151,12 @@
   .field.col { flex-direction: column; align-items: stretch; }
   .field.col input { width: 100%; }
   .hint { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  body.readonly #addForm, body.readonly #autoBtn, body.readonly .task .del, body.readonly .task .sched,
+  body.readonly #carry, body.readonly #setup, body.readonly #settingsBtn, body.readonly .sched-row { display: none !important; }
+  body.readonly .task .time, body.readonly .task .star, body.readonly #mood button { pointer-events: none; }
+  body.readonly input:disabled, body.readonly textarea:disabled { opacity: 1; color: var(--text); background: transparent; }
+  body.readonly .task.done .text:disabled { color: var(--muted); }
+  #viewLink { width: 100%; font-size: 12px; }
   #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #111; color: #fff;
     padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 10; }
   #toast.show { opacity: .92; }
@@ -171,6 +179,7 @@
   </div>
 </header>
 <nav id="week" class="week"></nav>
+<div id="viewBanner" class="demo" hidden>👀 <b>보기 전용</b> 화면이에요. 날짜를 넘겨 볼 수 있고, 내용은 열 때마다 최신으로 바뀌어요.</div>
 <div id="setup" class="demo setup" hidden><span>👋 처음이에요? <b>설정</b>에서 Apps Script 주소를 넣으면 구글 캘린더와 동기화돼요. 주소 없이도 이 기기 안에서는 바로 쓸 수 있어요.</span><button id="setupBtn">설정 열기</button></div>
 
 <main class="grid">
@@ -216,6 +225,12 @@
   <div class="field"><span>하루 끝</span><select id="sEnd"></select></div>
   <div class="field"><span>기본 소요 시간</span><select id="sMin"></select></div>
   <div class="field"><span>할 일을 넣을 캘린더</span><select id="sCal"></select></div>
+  <div class="field-group"><h4>👨‍👩‍👧 부모님 보기 링크</h4>
+    <div class="field col"><input id="sViewUrl" placeholder="보기 전용 배포 주소 (…/exec)" autocomplete="off" spellcheck="false"></div>
+    <div class="field" style="justify-content:flex-end;gap:6px;flex-wrap:wrap"><button id="sViewMake" type="button">링크 만들기·복사</button><button id="sViewReset" type="button">링크 바꾸기</button></div>
+    <div class="field col"><input id="viewLink" readonly hidden></div>
+    <div class="hint">이 링크를 가진 사람은 내 플래너를 <b>볼 수만</b> 있어요. 링크가 퍼졌다면 <b>링크 바꾸기</b>를 누르면 예전 링크는 바로 막혀요.</div>
+  </div>
   <div class="field-group"><h4>🔔 알림</h4>
     <div class="field"><span>캘린더 알림<br><span class="muted">할 일을 캘린더에 넣을 때 적용</span></span><select id="sRemind"></select></div>
     <div class="field"><label><input type="checkbox" id="sInApp"> 플래너를 열어 두면 시작/끝 시간에 소리+배너</label></div>
@@ -274,6 +289,7 @@ async function load(date) {
   } catch (e) { fail(e); }
 }
 function markDirty(delay = 700) {
+  if (VIEW) return;
   S.dirty = true; clearTimeout(S.timer);
   S.timer = setTimeout(flushSave, delay);
   updateWeekCell();
@@ -300,6 +316,15 @@ function updateNet() {
   const el = $('netState'); if (!el) return;
   const n = dirtyDates().length;
   let cls = 'net', txt, title = '';
+  if (VIEW) {
+    const t = Store.get('lastPull', 0), hm = t ? new Date(t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '';
+    if (!navigator.onLine) { txt = '📵 오프라인 · 저장된 내용'; }
+    else if (Viewer.busy) { cls = 'net wait'; txt = '🔄 불러오는 중…'; }
+    else if (Viewer.lastError) { txt = '⚠ ' + Viewer.lastError; title = '잠시 후 다시 열어 보세요'; }
+    else { cls = 'net ok'; txt = '👀 보기 전용' + (hm ? ' · ' + hm : ''); title = '마지막 업데이트 ' + hm; }
+    el.hidden = false; el.className = cls; el.textContent = txt; el.title = title;
+    return;
+  }
   if (!Bridge.url()) { txt = '⚙ 동기화 설정 필요'; title = '설정에서 Apps Script 주소를 넣어 주세요'; }
   else if (!navigator.onLine) {
     txt = n ? `📵 오프라인 · 대기 ${n}일` : '📵 오프라인';
@@ -318,7 +343,7 @@ function updateNet() {
   el.hidden = false; el.className = cls; el.textContent = txt; el.title = title;
   renderConn();
 }
-window.addEventListener('online', () => { Sync.announce = true; updateNet(); setTimeout(() => Bridge.ready ? Sync.run() : Bridge.connect(), 1500); });
+window.addEventListener('online', () => { Sync.announce = true; updateNet(); setTimeout(() => (VIEW || Bridge.ready) ? Sync.run({ pull: !!VIEW }) : Bridge.connect(), 1500); });
 window.addEventListener('offline', updateNet);
 setInterval(() => Sync.run(), 60000);
 
@@ -338,7 +363,7 @@ function refreshView() {        // 동기화로 받아온 내용을 화면에 �
 
 // ---------- 렌더링 ----------
 function render() {
-  renderHeader(); renderWeek(); renderTasks(); renderTimeline(); renderNotes();
+  renderHeader(); renderWeek(); renderTasks(); renderTimeline(); renderNotes(); applyReadonly();
 }
 
 function renderHeader() {
@@ -348,7 +373,7 @@ function renderHeader() {
   $('dateSub').textContent = diff === 0 ? '오늘' : diff === -1 ? '어제' : diff === 1 ? '내일'
     : diff > 0 ? diff + '일 후' : -diff + '일 전';
   $('datePick').value = S.date;
-  $('setup').hidden = !!Bridge.url();
+  $('setup').hidden = !!Bridge.url() || !!VIEW;
 }
 
 function renderWeek() {
@@ -485,6 +510,7 @@ function renderNotes() {
 const taskById = id => plan().tasks.find(t => t.id === id);
 
 $('tasks').addEventListener('click', async ev => {
+  if (VIEW) return ev.preventDefault();
   const li = ev.target.closest('[data-id]'); if (!li) return;
   const t = taskById(li.dataset.id); if (!t) return;
   const b = ev.target;
@@ -564,6 +590,7 @@ $('focus').oninput = () => { plan().focus = $('focus').value; markDirty(); };
 $('notes').oninput = () => { plan().notes = $('notes').value; markDirty(); };
 $('review').oninput = () => { plan().review = $('review').value; markDirty(); };
 $('mood').onclick = ev => {
+  if (VIEW) return;
   const m = Number(ev.target.dataset.mood); if (!m) return;
   plan().mood = plan().mood === m ? 0 : m; markDirty(0); renderNotes();
 };
@@ -602,6 +629,8 @@ $('settingsBtn').onclick = async () => {
   $('sInApp').checked = st.inAppAlert !== false;
   renderNotiState();
   $('sGas').value = Bridge.url();
+  $('sViewUrl').value = Store.get('viewDeployUrl', '');
+  $('viewLink').hidden = true;
   renderConn();
   $('sCal').innerHTML = opt(st.calendarId, st.calendarId ? '(저장된 캘린더)' : '기본 캘린더', st.calendarId);
   $('settings').showModal();
@@ -697,6 +726,7 @@ $('alert').onclick = async ev => {
 };
 
 function checkAlerts() {
+  if (VIEW) return;
   if (!S.day || settings().inAppAlert === false || S.date !== S.day.today) return;
   const now = currentMin();
   plan().tasks.forEach(t => {
@@ -713,7 +743,7 @@ function checkAlerts() {
 setInterval(checkAlerts, 20000);
 
 // ---------- 이 기기 저장소 ----------
-const KP = 'dp2:';
+let KP = 'dp2:';
 const memStore = {};
 const Store = {
   get(k, d = null) {
@@ -810,7 +840,7 @@ const Local = {
 const API = {
   getDay: d => Local.getDay(d),
   getWeek: d => Local.getWeek(d),
-  savePlan: (d, p) => Local.savePlan(d, p),
+  savePlan: (d, p) => VIEW ? true : Local.savePlan(d, p),
   carryOver: d => Local.carryOver(d),
   async scheduleTasks(date, items) {
     if (Sync.canTalk()) {
@@ -843,11 +873,12 @@ const API = {
 };
 
 // ---------- Apps Script 연결 창 (숨은 iframe, 안 되면 작은 팝업 창) ----------
-const GAS_RE = /^https:\/\/script\.google\.com\/[^\s?#]+\/exec$/;
+const GAS_RE = location.hostname === 'localhost' ? /^https?:\/\/(script\.google\.com|localhost:\d+)\/[^\s?#]*exec$/ : /^https:\/\/script\.google\.com\/[^\s?#]+\/exec$/;
 const Bridge = {
   ready: false, state: 'idle', port: null, frame: null, win: null, nonce: '', seq: 0, waits: new Map(), email: '',
   url() { return Store.get('gasUrl', ''); },
   connect(mode = 'frame') {
+    if (VIEW) return;
     if (!this.url()) { this.state = 'idle'; return updateNet(); }
     if (!navigator.onLine) { this.state = 'offline'; return updateNet(); }
     if (this.state === 'connecting' && mode === 'frame') return;
@@ -909,6 +940,7 @@ const Sync = {
   canTalk() { return navigator.onLine && Bridge.ready; },
   soon(ms = 2500) { clearTimeout(this.timer); this.timer = setTimeout(() => this.run(), ms); },
   async run(opts = {}) {
+    if (VIEW) return Viewer.maybe(opts);
     if (this.busy) { this.again = { pull: !!(opts.pull || (this.again && this.again.pull)) }; return; }
     if (!this.canTalk()) return updateNet();
     this.busy = true; updateNet();
@@ -971,6 +1003,7 @@ const Sync = {
     Store.set('lastPull', Date.now());
   },
   async ensureDay(date) {
+    if (VIEW) return Viewer.ensure(date);
     const c = Store.get('events:' + date);
     if (!this.canTalk() || (c && Date.now() - c.at < 10 * 60000)) return;
     const diff = Math.round((new Date(date) - new Date(localToday())) / 864e5);
@@ -987,7 +1020,7 @@ function renderConn() {
     : Bridge.ready ? '✅ 연결됨' + (acc ? ' · ' + acc : '')
     : Bridge.state === 'connecting' ? '🔄 연결 중…' : '⚠ 연결 안 됨';
 }
-$('netState').onclick = () => $('settingsBtn').click();
+$('netState').onclick = () => VIEW ? Viewer.pull(addDays(S.date, -7)) : $('settingsBtn').click();
 $('setupBtn').onclick = () => $('settingsBtn').click();
 $('sSync').onclick = () => {
   if (!navigator.onLine) return toast('📵 인터넷이 연결되면 자동으로 동기화해요');
@@ -1006,6 +1039,79 @@ $('sPopup').onclick = () => {
   const g = new URLSearchParams(location.search).get('gas');
   if (g && GAS_RE.test(g)) { Store.set('gasUrl', g); history.replaceState(null, '', location.pathname); }
 })();
+// ---------- 부모님 보기 전용 모드 ----------
+const b64u = s => btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64u = s => atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4));
+const VIEW = (() => {
+  const m = location.hash.match(/^#view=([A-Za-z0-9_-]+)\.([A-Za-z0-9]+)$/);
+  if (m) {
+    try {
+      const url = unb64u(m[1]);
+      if (GAS_RE.test(url)) { const v = { url, key: m[2] }; localStorage.setItem('dpv:link', JSON.stringify(v)); return v; }
+    } catch (e) {}
+  }
+  try {   // 링크로 설치한 앱을 다시 열 때 (내 플래너가 설정돼 있지 않은 기기에서만)
+    const v = JSON.parse(localStorage.getItem('dpv:link') || 'null');
+    if (v && !localStorage.getItem('dp2:gasUrl')) return v;
+  } catch (e) {}
+  return null;
+})();
+if (VIEW) {
+  KP = 'dpv:';
+  document.body.classList.add('readonly');
+  document.title = '하루 플래너 (보기 전용)';
+  $('viewBanner').hidden = false;
+}
+const Viewer = {
+  busy: false, lastError: '',
+  async pull(start) {
+    if (!navigator.onLine || this.busy) return;
+    this.busy = true; updateNet();
+    try {
+      const u = `${VIEW.url}?view=1&k=${encodeURIComponent(VIEW.key)}&start=${start}&n=22`;
+      const r = await (await fetch(u, { redirect: 'follow' })).json();
+      if (r.error) throw new Error(r.error);
+      r.days.forEach(d => Sync.absorb(d, true));
+      if (r.settings) Store.set('settings', Object.assign(r.settings, { inAppAlert: false }));
+      Store.set('lastPull', Date.now()); Store.set('pullFrom', start);
+      this.lastError = '';
+    } catch (e) {
+      console.error(e);
+      this.lastError = /JSON|token|fetch|NetworkError/i.test(e.message) ? '연결이 안 돼요' : e.message;
+    } finally { this.busy = false; refreshView(); }
+  },
+  maybe(opts) {
+    const from = S.date ? addDays(S.date, -7) : addDays(localToday(), -7);
+    if (opts.pull || Date.now() - Store.get('lastPull', 0) > 3 * 60000) return this.pull(from);
+  },
+  ensure(date) {
+    const c = Store.get('events:' + date);
+    if (!c || Date.now() - c.at > 3 * 60000) return this.pull(addDays(date, -7));
+  }
+};
+function applyReadonly() {
+  if (!VIEW) return;
+  document.querySelectorAll('#focus, #notes, #review, .task .text, .task .chk').forEach(el => { el.disabled = true; });
+}
+
+// 내 설정 화면: 부모님 보기 링크 만들기
+async function makeViewLink(reset) {
+  const url = $('sViewUrl').value.trim();
+  if (!GAS_RE.test(url)) return toast('보기 전용 배포 주소(…/exec)를 먼저 넣어 주세요');
+  if (url === Bridge.url()) return toast('내 배포 주소가 아니라, 새로 만든 "보기 전용 배포" 주소를 넣어 주세요');
+  if (!Sync.canTalk()) return toast('인터넷에 연결되고 ✓ 동기화됨일 때 만들 수 있어요');
+  Store.set('viewDeployUrl', url);
+  try {
+    const key = await Bridge.call(reset ? 'resetViewKey' : 'getViewKey');
+    const link = location.origin + location.pathname + '#view=' + b64u(url) + '.' + key;
+    $('viewLink').value = link; $('viewLink').hidden = false; $('viewLink').select();
+    try { await navigator.clipboard.writeText(link); toast(reset ? '🔄 새 링크를 복사했어요. 예전 링크는 이제 안 열려요' : '📋 링크를 복사했어요. 카톡에 붙여넣어 보내세요'); }
+    catch (e) { toast('아래 링크를 길게 눌러 복사해 주세요'); }
+  } catch (e) { fail(e); }
+}
+$('sViewMake').onclick = () => makeViewLink(false);
+$('sViewReset').onclick = () => { if (confirm('지금 링크를 못 쓰게 하고 새 링크를 만들까요?')) makeViewLink(true); };
+
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
   navigator.serviceWorker.register('sw.js').catch(e => console.warn(e));
 }

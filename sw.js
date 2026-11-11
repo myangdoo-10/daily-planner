@@ -1,5 +1,5 @@
 // 하루 플래너 오프라인 지원: 앱 파일을 기기에 저장해 두고, 인터넷이 없으면 저장본으로 열어요.
-const CACHE = 'daily-planner-v1';
+const CACHE = 'daily-planner-v2';
 const FILES = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {
