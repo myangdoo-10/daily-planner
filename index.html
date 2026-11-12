@@ -157,7 +157,15 @@
   body.readonly input:disabled, body.readonly textarea:disabled { opacity: 1; color: var(--text); background: transparent; }
   body.readonly .task.done .text:disabled { color: var(--muted); }
   #viewLink { width: 100%; font-size: 12px; }
-  #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #111; color: #fff;
+  .legend { margin: -2px 0 10px; }
+  .legend-toggle { border: 0; background: none; padding: 2px 0; font-size: 12px; color: var(--muted); }
+  .legend-toggle:hover { color: var(--accent); }
+  .legend-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .legend-chips button { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 0;
+    background: var(--accent-soft); color: var(--text); cursor: help; }
+  .legend-chips button.here { outline: 1.5px solid var(--accent); }
+  .legend.closed .legend-chips { display: none; }
+  #toast { max-width: min(560px, calc(100vw - 32px)); text-align: center; line-height: 1.5; position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: #111; color: #fff;
     padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 10; }
   #toast.show { opacity: .92; }
   body.busy { cursor: progress; }
@@ -191,6 +199,7 @@
       <button id="autoBtn" title="일정 없는 빈 시간에 할 일을 차례로 넣어요">⚡ 빈 시간에 자동 배치</button>
     </div>
     <div class="progress"><i id="progressBar" style="width:0"></i></div>
+    <div id="legend" class="legend"><button id="legendToggle" type="button" class="legend-toggle"></button><div id="legendChips" class="legend-chips"></div></div>
     <ul id="tasks"></ul>
     <form id="addForm">
       <input id="newTask" placeholder="할 일 추가 후 Enter" autocomplete="off">
@@ -268,7 +277,7 @@ const settings = () => S.day.settings;
 
 function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.classList.add('show');
-  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200);
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), msg.length > 40 ? 4500 : 2200);
 }
 function fail(e) {
   if (!navigator.onLine) toast('📵 인터넷이 없어서 지금은 못 해요. 연결되면 다시 해 주세요');
@@ -363,7 +372,7 @@ function refreshView() {        // 동기화로 받아온 내용을 화면에 �
 
 // ---------- 렌더링 ----------
 function render() {
-  renderHeader(); renderWeek(); renderTasks(); renderTimeline(); renderNotes(); applyReadonly();
+  renderHeader(); renderWeek(); renderTasks(); renderLegend(); renderTimeline(); renderNotes(); applyReadonly();
 }
 
 function renderHeader() {
@@ -420,7 +429,7 @@ function renderTasks() {
     const row = `<li class="task ${t.done ? 'done' : ''}" data-id="${t.id}">
       <input type="checkbox" class="chk" ${t.done ? 'checked' : ''} aria-label="완료">
       <button class="star ${t.star ? 'on' : ''}" title="중요">${t.star ? '★' : '☆'}</button>
-      <input class="text" value="${esc(t.text)}" aria-label="할 일">
+      <input class="text" value="${esc(t.text)}" title="${esc(t.text)}" aria-label="할 일">
       ${t.carryCount ? `<span class="badge" title="${t.carryCount}번 미뤄진 일">↻${t.carryCount}</span>` : ''}
       ${t.time ? `<button class="time" title="${t.pendingSched ? '인터넷이 연결되면 캘린더에 넣어요' : '캘린더 일정 수정'}">${t.pendingSched ? '⏳' : '🕘'} ${t.time} · ${minLabel(t.minutes)}</button>`
                : `<button class="sched" title="캘린더에 시간 잡기">🗓 ${minLabel(t.minutes || settings().defaultMinutes)}</button>`}
@@ -505,6 +514,39 @@ function renderNotes() {
   $('review').value = plan().review || '';
   $('mood').innerHTML = MOODS.map((m, i) => `<button class="${plan().mood === i + 1 ? 'on' : ''}" data-mood="${i + 1}">${m}</button>`).join('');
 }
+
+// ---------- 할 일 표시(이모지) 설명 ----------
+const LEGEND = [
+  ['📖', '이해', '교과서·개념서를 읽고 흐름 잡기. 외우지 않고 문제도 안 풀어요'],
+  ['✏️', '문제풀이', '풀고 채점까지, 틀린 문제 표시'],
+  ['🔁', '다시 보기', '읽은 부분을 가볍게 한 번 더 훑기'],
+  ['📝', '요약 노트', '헷갈렸던 부분 위주로 단원 핵심 1~2장 정리 (할 일 맨 앞 📝는 "아직 안 함" 표시)'],
+  ['🧠', '암기', '요약 노트를 가리고 백지에 써낼 때까지 반복'],
+  ['✅', '끝', '그 교재·범위를 이 할 일로 다 끝낸다는 뜻 (할 일 맨 앞 ✅는 "완료" 표시)'],
+  ['🧪', '과학 수행', '과학 수행평가 준비'],
+  ['🗂', '사회 수행', '사회 수행평가 준비'],
+  ['🎤', '발표 준비', '발표 준비'],
+  ['🌙', '어젯밤 이어서', '자정 넘어 기숙사에서 하는 공부. 전날 밤 몫이라 다음 날 00:00 할 일로 들어가요'],
+  ['🛜', '인터넷 되는 시간', '야자 1교시, 주말 자습 1·3교시']
+];
+function legendClosed() { try { return localStorage.getItem('dp:legendClosed') === '1'; } catch (e) { return false; } }
+function renderLegend() {
+  const closed = legendClosed();
+  const text = plan().tasks.map(t => t.text).join(' ');
+  $('legend').classList.toggle('closed', closed);
+  $('legendToggle').textContent = closed ? 'ⓘ 표시 설명 보기' : 'ⓘ 표시 설명 접기';
+  $('legendChips').innerHTML = LEGEND.map(([e, name, desc], i) =>
+    `<button type="button" data-i="${i}" class="${text.includes(e) ? 'here' : ''}" title="${esc(desc)}">${e} ${esc(name)}</button>`).join('');
+}
+$('legendToggle').onclick = () => {
+  try { localStorage.setItem('dp:legendClosed', legendClosed() ? '0' : '1'); } catch (e) {}
+  renderLegend();
+};
+$('legendChips').onclick = ev => {
+  const b = ev.target.closest('[data-i]'); if (!b) return;
+  const [e, name, desc] = LEGEND[b.dataset.i];
+  toast(`${e} ${name}: ${desc}`);
+};
 
 // ---------- 동작 ----------
 const taskById = id => plan().tasks.find(t => t.id === id);
